@@ -67,16 +67,19 @@ void solve(const PoissonParameters&  a_params)
   CH_START(t2);
   Vector<LevelData<EBCellFAB>* > phi(a_params.numLevels);
   Vector<LevelData<EBCellFAB>* > rhs(a_params.numLevels);
+  Vector<LevelData<EBCellFAB>* > resid(a_params.numLevels);
   ParmParse pp;
   for (int ilev = 0; ilev < a_params.numLevels; ilev++)
     {
       EBCellFactory factory(ebisl[ilev]);
       phi[ilev] = new LevelData<EBCellFAB>(grids[ilev],nvar, a_params.ghostPhi, factory);
       rhs[ilev] = new LevelData<EBCellFAB>(grids[ilev],nvar, a_params.ghostRHS, factory);
+      resid[ilev] = new LevelData<EBCellFAB>(grids[ilev],nvar, a_params.ghostRHS, factory);      
 
       //for now just set phi to 1 and rhs to -1.
       EBLevelDataOps::setVal(*phi[ilev], 1.0);
       EBLevelDataOps::setVal(*rhs[ilev], -1.0);
+      EBLevelDataOps::setVal(*resid[ilev], 0.0);      
     }
   CH_STOP(t2);
 
@@ -129,27 +132,39 @@ void solve(const PoissonParameters&  a_params)
       char charstr[100];
       sprintf(charstr, "%s.%dd.hdf5", plot_prefix.c_str(), SpaceDim);
       string filename(charstr);
-      // write out phi and rhs -- this is wrong for nvar != 1
+      // write out phi and rhs as well as residual -- this is wrong for nvar != 1
       CH_assert(nvar == 1);
-      Vector<string> names(2);
+      Vector<string> names(3);
       names[0] = string("phi");
       names[1] = string("rhs");
+      names[2] = string("residual");
+
+      // compute residual
+      bool homogeneousBC = false;
+      // set this to be true as a reality check (can turn off later)
+      bool computeNorm = true;
+      int lmax = phi.size() -1;
+      int lbase = 0;
+      solver.computeAMRResidual(resid, phi, rhs, lmax, lbase, homogeneousBC, computeNorm);
       
       Vector<LevelData<EBCellFAB>* > plotData(phi.size());
       for (int lev=0; lev< plotData.size(); lev++)
 	{
-	  int nPlotComp = 2*nvar;
+	  // 3 comps per variable: phi, rhs, residual
+	  int nPlotComp = 3*nvar;
 	  EBCellFactory factory(ebisl[lev]);
 	  plotData[lev] = new LevelData<EBCellFAB>(grids[lev],nPlotComp, a_params.ghostPhi, factory);
 	  Interval srcComps(0,nvar-1);
 	  Interval phiDestComps(0,nvar-1);
 	  Interval rhsDestComps(nvar,2*nvar-1);
+	  Interval residDestComps(2*nvar,3*nvar-1);
 	  phi[lev]->copyTo(srcComps,*plotData[lev],phiDestComps);
 	  rhs[lev]->copyTo(srcComps,*plotData[lev],rhsDestComps);
+	  resid[lev]->copyTo(srcComps,*plotData[lev],residDestComps);	  
 	}
       
       bool replaceCovered;
-      Vector<Real> coveredValues(1, 0.0);
+      Vector<Real> coveredValues(3, 0.0);
       Real dumReal =  1.0;
       writeEBHDF5(filename, grids, plotData, names,
                   a_params.coarsestDomain.domainBox(), a_params.coarsestDx[0], dumReal, dumReal,
@@ -167,6 +182,7 @@ void solve(const PoissonParameters&  a_params)
     {
       delete phi[ilev] ;
       delete rhs[ilev] ;
+      delete resid[ilev];
     }
 }
 /******/
